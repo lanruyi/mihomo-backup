@@ -40,22 +40,22 @@ jobs:
         cp -rf ./tmp/mihomo/log ./
         cp -rf ./tmp/mihomo/ntp ./
         cp -rf ./tmp/mihomo/rules ./
-	cp -rf ./tmp/mihomo/test ./
-	cp -rf ./tmp/mihomo/transport ./
-	cp -rf ./tmp/mihomo/tunnel ./
- 	cp -rf ./tmp/mihomo/.golangci.yaml ./
-	cp -rf ./tmp/mihomo/Dockerfile ./
-	cp -rf ./tmp/mihomo/LICENSE ./
-	cp -rf ./tmp/mihomo/Makefile ./
-	cp -rf ./tmp/mihomo/Meta.png ./
-	cp -rf ./tmp/mihomo/README.md ./
-	cp -rf ./tmp/mihomo/android_tz.go ./
-	cp -rf ./tmp/mihomo/check_amd64.sh ./
- 	cp -rf ./tmp/mihomo/flake.lock ./
- 	cp -rf ./tmp/mihomo/flake.nix ./
- 	cp -rf ./tmp/mihomo/go.mod ./
- 	cp -rf ./tmp/mihomo/go.sum ./
- 	cp -rf ./tmp/mihomo/main.go ./
+		cp -rf ./tmp/mihomo/test ./
+		cp -rf ./tmp/mihomo/transport ./
+		cp -rf ./tmp/mihomo/tunnel ./
+ 		cp -rf ./tmp/mihomo/.golangci.yaml ./
+		cp -rf ./tmp/mihomo/Dockerfile ./
+		cp -rf ./tmp/mihomo/LICENSE ./
+		cp -rf ./tmp/mihomo/Makefile ./
+		cp -rf ./tmp/mihomo/Meta.png ./
+		cp -rf ./tmp/mihomo/README.md ./
+		cp -rf ./tmp/mihomo/android_tz.go ./
+		cp -rf ./tmp/mihomo/check_amd64.sh ./
+ 		cp -rf ./tmp/mihomo/flake.lock ./
+ 		cp -rf ./tmp/mihomo/flake.nix ./
+ 		cp -rf ./tmp/mihomo/go.mod ./
+ 		cp -rf ./tmp/mihomo/go.sum ./
+ 		cp -rf ./tmp/mihomo/main.go ./
 
     - name: Apply commit changes
       run: |
