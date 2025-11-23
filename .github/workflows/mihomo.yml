@@ -1,0 +1,68 @@
+name: Update-mihomo
+
+on:
+  schedule:
+    - cron: 0/5 * * * *
+
+jobs:
+
+  prepare:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        ref: main
+        fetch-depth: 0
+        lfs: true
+
+    - name: Set git identity
+      run : |
+        git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git config --global user.name "github-actions[bot]"
+    - name: Load latest mihomo
+      run: |
+        git clone -b Alpha https://github.com/MetaCubeX/mihomo.git --depth=1 ./tmp/mihomo
+        cp -rf ./tmp/mihomo/adapter ./
+        cp -rf ./tmp/mihomo/common ./
+        cp -rf ./tmp/mihomo/component ./
+        cp -rf ./tmp/mihomo/config ./
+        cp -rf ./tmp/mihomo/constant ./
+        cp -rf ./tmp/mihomo/context ./
+        cp -rf ./tmp/mihomo/dns ./
+        cp -rf ./tmp/mihomo/docker ./
+        cp -rf ./tmp/mihomo/docs ./
+        cp -rf ./tmp/mihomo/hub ./
+        cp -rf ./tmp/mihomo/listener ./
+        cp -rf ./tmp/mihomo/log ./
+        cp -rf ./tmp/mihomo/ntp ./
+        cp -rf ./tmp/mihomo/rules ./
+	cp -rf ./tmp/mihomo/test ./
+	cp -rf ./tmp/mihomo/transport ./
+	cp -rf ./tmp/mihomo/tunnel ./
+ 	cp -rf ./tmp/mihomo/.golangci.yaml ./
+	cp -rf ./tmp/mihomo/Dockerfile ./
+	cp -rf ./tmp/mihomo/LICENSE ./
+	cp -rf ./tmp/mihomo/Makefile ./
+	cp -rf ./tmp/mihomo/Meta.png ./
+	cp -rf ./tmp/mihomo/README.md ./
+	cp -rf ./tmp/mihomo/android_tz.go ./
+	cp -rf ./tmp/mihomo/check_amd64.sh ./
+ 	cp -rf ./tmp/mihomo/flake.lock ./
+ 	cp -rf ./tmp/mihomo/flake.nix ./
+ 	cp -rf ./tmp/mihomo/go.mod ./
+ 	cp -rf ./tmp/mihomo/go.sum ./
+ 	cp -rf ./tmp/mihomo/main.go ./
+
+    - name: Apply commit changes
+      run: |
+        git add ./adapter/ ./common/ ./component/ ./config/ ./constant/ ./context/ ./dns/ ./docker/ ./docs/ ./hub/ ./listener/ ./log/ ./ntp/ ./rules/ ./test/ ./transport/ ./tunnel/ ./golangci.yaml ./Dockerfile ./LICENSE ./Makefile ./Meta.png ./android_tz.go ./check_amd64.sh ./flake.lock ./flake.nix ./README.md ./go.mod ./go.sum ./main.go
+        echo -e "[bot] mihomo: update\n\nlatest commit: $(cat ./tmp/mihomo/.git/refs/heads/main)" > ./tmp/message
+        git commit --file="./tmp/message" || exit 0
+    - name: Push Commits
+      env:
+        DOWNSTREAM_BRANCH: main
+      run: git push origin $DOWNSTREAM_BRANCH
