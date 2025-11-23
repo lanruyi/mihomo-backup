@@ -39,27 +39,26 @@ jobs:
         cp -rf ./tmp/mihomo/listener ./
         cp -rf ./tmp/mihomo/log ./
         cp -rf ./tmp/mihomo/ntp ./
-        cp -rf ./tmp/mihomo/rules ./
-		cp -rf ./tmp/mihomo/test ./
-		cp -rf ./tmp/mihomo/transport ./
-		cp -rf ./tmp/mihomo/tunnel ./
- 		cp -rf ./tmp/mihomo/.golangci.yaml ./
-		cp -rf ./tmp/mihomo/Dockerfile ./
-		cp -rf ./tmp/mihomo/LICENSE ./
-		cp -rf ./tmp/mihomo/Makefile ./
-		cp -rf ./tmp/mihomo/Meta.png ./
-		cp -rf ./tmp/mihomo/README.md ./
-		cp -rf ./tmp/mihomo/android_tz.go ./
-		cp -rf ./tmp/mihomo/check_amd64.sh ./
- 		cp -rf ./tmp/mihomo/flake.lock ./
- 		cp -rf ./tmp/mihomo/flake.nix ./
- 		cp -rf ./tmp/mihomo/go.mod ./
- 		cp -rf ./tmp/mihomo/go.sum ./
- 		cp -rf ./tmp/mihomo/main.go ./
-
+        cp -rf ./tmp/mihomo/rules ./ 
+        cp -rf ./tmp/mihomo/test ./
+        cp -rf ./tmp/mihomo/transport ./
+        cp -rf ./tmp/mihomo/tunnel ./
+        cp -rf ./tmp/mihomo/.golangci.yaml ./
+        cp -rf ./tmp/mihomo/Dockerfile ./
+        cp -rf ./tmp/mihomo/LICENSE ./
+        cp -rf ./tmp/mihomo/Makefile ./
+        cp -rf ./tmp/mihomo/Meta.png ./
+        cp -rf ./tmp/mihomo/README.md ./
+        cp -rf ./tmp/mihomo/android_tz.go ./
+        cp -rf ./tmp/mihomo/check_amd64.sh ./
+        cp -rf ./tmp/mihomo/flake.lock ./
+        cp -rf ./tmp/mihomo/flake.nix ./
+        cp -rf ./tmp/mihomo/go.mod ./
+        cp -rf ./tmp/mihomo/go.sum ./
+        cp -rf ./tmp/mihomo/main.go ./
     - name: Apply commit changes
       run: |
-        git add ./adapter/ ./common/ ./component/ ./config/ ./constant/ ./context/ ./dns/ ./docker/ ./docs/ ./hub/ ./listener/ ./log/ ./ntp/ ./rules/ ./test/ ./transport/ ./tunnel/ ./golangci.yaml ./Dockerfile ./LICENSE ./Makefile ./Meta.png ./android_tz.go ./check_amd64.sh ./flake.lock ./flake.nix ./README.md ./go.mod ./go.sum ./main.go
+        git add ./adapter/ ./common/ ./component/ ./config/ ./constant/ ./context/ ./dns/ ./docker/ ./docs/ ./hub/ ./listener/ ./log/ ./ntp/ ./rules/ ./test/ ./transport/ ./tunnel/ ./.golangci.yaml ./Dockerfile ./LICENSE ./Makefile ./Meta.png ./android_tz.go ./check_amd64.sh ./flake.lock ./flake.nix ./README.md ./go.mod ./go.sum ./main.go
         echo -e "[bot] mihomo: update\n\nlatest commit: $(cat ./tmp/mihomo/.git/refs/heads/main)" > ./tmp/message
         git commit --file="./tmp/message" || exit 0
     - name: Push Commits
