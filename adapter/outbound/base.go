@@ -12,6 +12,7 @@ import (
 	N "github.com/metacubex/mihomo/common/net"
 	"github.com/metacubex/mihomo/common/utils"
 	"github.com/metacubex/mihomo/component/dialer"
+	"github.com/metacubex/mihomo/component/proxydialer"
 	"github.com/metacubex/mihomo/component/resolver"
 	C "github.com/metacubex/mihomo/constant"
 	"github.com/metacubex/mihomo/log"
@@ -35,6 +36,7 @@ type Base struct {
 	rmark  int
 	id     string
 	prefer C.DNSPrefer
+	dialer C.Dialer
 }
 
 // Name implements C.ProxyAdapter
@@ -164,6 +166,20 @@ type BasicOption struct {
 	RoutingMark int    `proxy:"routing-mark,omitempty"`
 	IPVersion   string `proxy:"ip-version,omitempty"`
 	DialerProxy string `proxy:"dialer-proxy,omitempty"` // don't apply this option into groups, but can set a group name in a proxy
+
+	DialerForAPI C.Dialer `proxy:"-"` // the dialer used for API usage has higher priority than all the above configurations.
+}
+
+func (b *BasicOption) NewDialer(opts []dialer.Option) C.Dialer {
+	cDialer := b.DialerForAPI
+	if cDialer == nil {
+		if b.DialerProxy != "" {
+			cDialer = proxydialer.NewByName(b.DialerProxy)
+		} else {
+			cDialer = dialer.NewDialer(opts...)
+		}
+	}
+	return cDialer
 }
 
 type BaseOption struct {
