@@ -173,7 +173,7 @@ func NewWireGuard(option WireGuardOption) (*WireGuard, error) {
 			udp:    option.UDP,
 			iface:  option.Interface,
 			rmark:  option.RoutingMark,
-			prefer: C.NewDNSPrefer(option.IPVersion),
+			prefer: option.IPVersion,
 		},
 	}
 	outbound.dialer = option.NewDialer(outbound.DialOptions())

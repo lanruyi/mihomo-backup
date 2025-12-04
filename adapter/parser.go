@@ -181,11 +181,12 @@ func ParseProxy(mapping map[string]any, options ...ProxyOption) (C.Proxy, error)
 	}
 
 	proxy = outbound.NewAutoCloseProxyAdapter(proxy)
-	return NewProxy(proxy), nil
+	return NewProxy(proxy, options...), nil
 }
 
 type proxyOption struct {
 	DialerForAPI C.Dialer
+	ProviderName string
 }
 
 func applyProxyOptions(options ...ProxyOption) proxyOption {
@@ -201,5 +202,11 @@ type ProxyOption func(opt *proxyOption)
 func WithDialerForAPI(dialer C.Dialer) ProxyOption {
 	return func(opt *proxyOption) {
 		opt.DialerForAPI = dialer
+	}
+}
+
+func WithProviderName(pdName string) ProxyOption {
+	return func(opt *proxyOption) {
+		opt.ProviderName = pdName
 	}
 }

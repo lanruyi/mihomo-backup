@@ -247,7 +247,7 @@ func NewHysteria(option HysteriaOption) (*Hysteria, error) {
 			tfo:    option.FastOpen,
 			iface:  option.Interface,
 			rmark:  option.RoutingMark,
-			prefer: C.NewDNSPrefer(option.IPVersion),
+			prefer: option.IPVersion,
 		},
 		option:    &option,
 		client:    client,

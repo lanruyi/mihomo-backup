@@ -174,7 +174,7 @@ func NewHttp(option HttpOption) (*Http, error) {
 			mpTcp:  option.MPTCP,
 			iface:  option.Interface,
 			rmark:  option.RoutingMark,
-			prefer: C.NewDNSPrefer(option.IPVersion),
+			prefer: option.IPVersion,
 		},
 		user:      option.UserName,
 		pass:      option.Password,

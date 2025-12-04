@@ -32,6 +32,7 @@ type internalProxyState struct {
 
 type Proxy struct {
 	C.ProxyAdapter
+	pdName  string
 	alive   atomic.Bool
 	history *queue.Queue[C.DelayHistory]
 	extra   xsync.Map[string, *internalProxyState]
@@ -40,6 +41,11 @@ type Proxy struct {
 // Adapter implements C.Proxy
 func (p *Proxy) Adapter() C.ProxyAdapter {
 	return p.ProxyAdapter
+}
+
+// ProviderName implements C.Proxy
+func (p *Proxy) ProviderName() string {
+	return p.pdName
 }
 
 // AliveForTestUrl implements C.Proxy
@@ -146,6 +152,7 @@ func (p *Proxy) MarshalJSON() ([]byte, error) {
 	mapping["name"] = p.Name()
 	mapping["udp"] = p.SupportUDP()
 	mapping["uot"] = p.SupportUOT()
+	mapping["provider-name"] = p.ProviderName()
 
 	proxyInfo := p.ProxyInfo()
 	mapping["xudp"] = proxyInfo.XUDP
@@ -153,8 +160,8 @@ func (p *Proxy) MarshalJSON() ([]byte, error) {
 	mapping["mptcp"] = proxyInfo.MPTCP
 	mapping["smux"] = proxyInfo.SMUX
 	mapping["interface"] = proxyInfo.Interface
-	mapping["dialer-proxy"] = proxyInfo.DialerProxy
 	mapping["routing-mark"] = proxyInfo.RoutingMark
+	mapping["dialer-proxy"] = proxyInfo.DialerProxy
 
 	return json.Marshal(mapping)
 }
@@ -278,9 +285,11 @@ func (p *Proxy) URLTest(ctx context.Context, url string, expectedStatus utils.In
 	return
 }
 
-func NewProxy(adapter C.ProxyAdapter) *Proxy {
+func NewProxy(adapter C.ProxyAdapter, options ...ProxyOption) *Proxy {
+	opt := applyProxyOptions(options...)
 	return &Proxy{
 		ProxyAdapter: adapter,
+		pdName:       opt.ProviderName,
 		history:      queue.New[C.DelayHistory](defaultHistoriesNum),
 		alive:        atomic.NewBool(true),
 	}

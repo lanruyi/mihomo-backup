@@ -154,6 +154,7 @@ type DelayHistoryStoreType int
 type Proxy interface {
 	ProxyAdapter
 	Adapter() ProxyAdapter
+	ProviderName() string
 	AliveForTestUrl(url string) bool
 	DelayHistory() []DelayHistory
 	ExtraDelayHistories() map[string]ProxyState
