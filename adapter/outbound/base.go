@@ -219,6 +219,7 @@ func NewBase(opt BaseOption) *Base {
 type conn struct {
 	N.ExtendedConn
 	chain       C.Chain
+	pdChain     C.Chain
 	adapterAddr string
 }
 
@@ -240,9 +241,15 @@ func (c *conn) Chains() C.Chain {
 	return c.chain
 }
 
+// ProviderChains implements C.Connection
+func (c *conn) ProviderChains() C.Chain {
+	return c.pdChain
+}
+
 // AppendToChains implements C.Connection
 func (c *conn) AppendToChains(a C.ProxyAdapter) {
 	c.chain = append(c.chain, a.Name())
+	c.pdChain = append(c.pdChain, a.ProxyInfo().ProviderName)
 }
 
 func (c *conn) Upstream() any {
@@ -265,7 +272,7 @@ func NewConn(c net.Conn, a C.ProxyAdapter) C.Conn {
 	if _, ok := c.(syscall.Conn); !ok { // exclusion system conn like *net.TCPConn
 		c = N.NewDeadlineConn(c) // most conn from outbound can't handle readDeadline correctly
 	}
-	cc := &conn{N.NewExtendedConn(c), nil, a.Addr()}
+	cc := &conn{N.NewExtendedConn(c), nil, nil, a.Addr()}
 	cc.AppendToChains(a)
 	return cc
 }
@@ -273,6 +280,7 @@ func NewConn(c net.Conn, a C.ProxyAdapter) C.Conn {
 type packetConn struct {
 	N.EnhancePacketConn
 	chain       C.Chain
+	pdChain     C.Chain
 	adapterName string
 	connID      string
 	adapterAddr string
@@ -293,9 +301,15 @@ func (c *packetConn) Chains() C.Chain {
 	return c.chain
 }
 
+// ProviderChains implements C.Connection
+func (c *packetConn) ProviderChains() C.Chain {
+	return c.pdChain
+}
+
 // AppendToChains implements C.Connection
 func (c *packetConn) AppendToChains(a C.ProxyAdapter) {
 	c.chain = append(c.chain, a.Name())
+	c.pdChain = append(c.pdChain, a.ProxyInfo().ProviderName)
 }
 
 func (c *packetConn) LocalAddr() net.Addr {
@@ -324,7 +338,7 @@ func newPacketConn(pc net.PacketConn, a ProxyAdapter) C.PacketConn {
 	if _, ok := pc.(syscall.Conn); !ok { // exclusion system conn like *net.UDPConn
 		epc = N.NewDeadlineEnhancePacketConn(epc) // most conn from outbound can't handle readDeadline correctly
 	}
-	cpc := &packetConn{epc, nil, a.Name(), utils.NewUUIDV4().String(), a.Addr(), a.ResolveUDP}
+	cpc := &packetConn{epc, nil, nil, a.Name(), utils.NewUUIDV4().String(), a.Addr(), a.ResolveUDP}
 	cpc.AppendToChains(a)
 	return cpc
 }
