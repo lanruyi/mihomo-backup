@@ -102,13 +102,14 @@ type Dialer interface {
 }
 
 type ProxyInfo struct {
-	XUDP        bool
-	TFO         bool
-	MPTCP       bool
-	SMUX        bool
-	Interface   string
-	RoutingMark int
-	DialerProxy string
+	XUDP         bool
+	TFO          bool
+	MPTCP        bool
+	SMUX         bool
+	Interface    string
+	RoutingMark  int
+	ProviderName string
+	DialerProxy  string
 }
 
 type ProxyAdapter interface {
@@ -154,7 +155,6 @@ type DelayHistoryStoreType int
 type Proxy interface {
 	ProxyAdapter
 	Adapter() ProxyAdapter
-	ProviderName() string
 	AliveForTestUrl(url string) bool
 	DelayHistory() []DelayHistory
 	ExtraDelayHistories() map[string]ProxyState

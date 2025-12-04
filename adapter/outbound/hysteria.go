@@ -243,6 +243,7 @@ func NewHysteria(option HysteriaOption) (*Hysteria, error) {
 			name:   option.Name,
 			addr:   addr,
 			tp:     C.Hysteria,
+			pdName: option.ProviderName,
 			udp:    true,
 			tfo:    option.FastOpen,
 			iface:  option.Interface,
