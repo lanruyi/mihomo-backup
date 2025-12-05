@@ -17,6 +17,10 @@ import (
 	"github.com/metacubex/mihomo/log"
 )
 
+type ProtocolConfig = apis.ProtocolConfig
+
+func DefaultConfig() *ProtocolConfig { return apis.DefaultConfig() }
+
 type SessionType int
 
 const (
@@ -106,13 +110,6 @@ func downlinkMode(cfg *apis.ProtocolConfig) byte {
 	return downlinkModePacked
 }
 
-func clientAEADSeed(key string) string {
-	if recovered, err := crypto.RecoverPublicKey(key); err == nil {
-		return crypto.EncodePoint(recovered)
-	}
-	return key
-}
-
 func buildClientObfsConn(raw net.Conn, cfg *apis.ProtocolConfig) net.Conn {
 	base := sudoku.NewConn(raw, cfg.Table, cfg.PaddingMin, cfg.PaddingMax, false)
 	if cfg.EnablePureDownlink {
@@ -148,6 +145,20 @@ func buildHandshakePayload(key string) [16]byte {
 	return payload
 }
 
+func NewTable(key string, tableType string) *sudoku.Table {
+	start := time.Now()
+	table := sudoku.NewTable(key, tableType)
+	log.Infoln("[Sudoku] Tables initialized (%s) in %v", tableType, time.Since(start))
+	return table
+}
+
+func ClientAEADSeed(key string) string {
+	if recovered, err := crypto.RecoverPublicKey(key); err == nil {
+		return crypto.EncodePoint(recovered)
+	}
+	return key
+}
+
 // ClientHandshake performs the client-side Sudoku handshake (without sending target address).
 func ClientHandshake(rawConn net.Conn, cfg *apis.ProtocolConfig) (net.Conn, error) {
 	if cfg == nil {
@@ -164,7 +175,7 @@ func ClientHandshake(rawConn net.Conn, cfg *apis.ProtocolConfig) (net.Conn, erro
 	}
 
 	obfsConn := buildClientObfsConn(rawConn, cfg)
-	cConn, err := crypto.NewAEADConn(obfsConn, clientAEADSeed(cfg.Key), cfg.AEADMethod)
+	cConn, err := crypto.NewAEADConn(obfsConn, ClientAEADSeed(cfg.Key), cfg.AEADMethod)
 	if err != nil {
 		return nil, fmt.Errorf("setup crypto failed: %w", err)
 	}
@@ -274,4 +285,20 @@ func ServerHandshake(rawConn net.Conn, cfg *apis.ProtocolConfig) (*ServerSession
 		Type:   SessionTypeTCP,
 		Target: target,
 	}, nil
+}
+
+func GenKeyPair() (privateKey, publicKey string, err error) {
+	// Generate Master Key
+	pair, err := crypto.GenerateMasterKey()
+	if err != nil {
+		return
+	}
+	// Split the master private key to get Available Private Key
+	availablePrivateKey, err := crypto.SplitPrivateKey(pair.Private)
+	if err != nil {
+		return
+	}
+	privateKey = availablePrivateKey            // Available Private Key for client
+	publicKey = crypto.EncodePoint(pair.Public) // Master Public Key for server
+	return
 }
