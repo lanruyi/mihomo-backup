@@ -3,6 +3,7 @@ module github.com/metacubex/mihomo
 go 1.20
 
 require (
+	filippo.io/edwards25519 v1.1.0
 	github.com/bahlo/generic-list-go v0.2.0
 	github.com/coreos/go-iptables v0.8.0
 	github.com/dlclark/regexp2 v1.11.5
@@ -63,8 +64,6 @@ require (
 	google.golang.org/protobuf v1.34.2 // lastest version compatible with golang1.20
 	gopkg.in/yaml.v3 v3.0.1
 )
-
-require filippo.io/edwards25519 v1.1.0
 
 require (
 	github.com/RyuaNerin/go-krypto v1.3.0 // indirect

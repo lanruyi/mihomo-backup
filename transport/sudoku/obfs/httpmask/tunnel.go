@@ -5,21 +5,24 @@ import (
 	"bytes"
 	"context"
 	crand "crypto/rand"
-	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	mrand "math/rand"
 	"net"
-	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/metacubex/mihomo/component/ca"
+
+	"github.com/metacubex/http"
+	"github.com/metacubex/http/httputil"
+	"github.com/metacubex/tls"
 )
 
 type TunnelMode string
@@ -210,9 +213,12 @@ func newHTTPClient(serverAddress string, opts TunnelDialOptions, maxIdleConns in
 		},
 	}
 	if scheme == "https" {
-		transport.TLSClientConfig = &tls.Config{
+		transport.TLSClientConfig, err = ca.GetTLSConfig(ca.Option{TLSConfig: &tls.Config{
 			ServerName: serverName,
 			MinVersion: tls.VersionTLS12,
+		}})
+		if err != nil {
+			return nil, httpClientTarget{}, err
 		}
 	}
 
@@ -495,6 +501,7 @@ func (c *streamSplitConn) pullLoop() {
 				case c.rxc <- payload:
 				case <-c.closed:
 					_ = resp.Body.Close()
+					cancel()
 					return
 				}
 			}
