@@ -8,5 +8,5 @@ import (
 
 const multipathTCPAvailable = false
 
-func setMultiPathTCP(dialer *net.Dialer, open bool) {
+func setMultiPathTCP(dialer *net.Dialer) {
 }

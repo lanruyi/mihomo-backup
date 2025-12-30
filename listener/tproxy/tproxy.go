@@ -46,7 +46,7 @@ func New(addr string, tunnel C.Tunnel, additions ...inbound.Addition) (*Listener
 			inbound.WithSpecialRules(""),
 		}
 	}
-	l, err := inbound.ListenWithoutMPTCP("tcp", addr) // tproxy must listen with mptcp disabled
+	l, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
 	}

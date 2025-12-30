@@ -38,7 +38,7 @@ func New(addr string, tunnel C.Tunnel, additions ...inbound.Addition) (*Listener
 		}
 	}
 
-	l, err := inbound.ListenWithoutMPTCP("tcp", addr) // redir might not be affected by mptcp, but it's still best to turn it off
+	l, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
