@@ -6,6 +6,6 @@ import "net"
 
 const multipathTCPAvailable = true
 
-func setMultiPathTCP(dialer *net.Dialer) {
-	dialer.SetMultipathTCP(true)
+func setMultiPathTCP(dialer *net.Dialer, open bool) {
+	dialer.SetMultipathTCP(open)
 }

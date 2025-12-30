@@ -140,9 +140,7 @@ func dialContext(ctx context.Context, network string, destination netip.Addr, po
 
 	dialer := netDialer.(*net.Dialer)
 	keepalive.SetNetDialer(dialer)
-	if opt.mpTcp {
-		setMultiPathTCP(dialer)
-	}
+	setMultiPathTCP(dialer, opt.mpTcp)
 
 	if DefaultSocketHook != nil { // ignore interfaceName, routingMark and tfo when DefaultSocketHook not null (in CMFA)
 		socketHookToToDialer(dialer)

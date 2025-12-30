@@ -82,6 +82,17 @@ func Listen(network, address string) (net.Listener, error) {
 	return ListenContext(context.Background(), network, address)
 }
 
+func ListenWithoutMPTCP(network, address string) (net.Listener, error) {
+	address, err := preResolve(network, address)
+	if err != nil {
+		return nil, err
+	}
+
+	var lc net.ListenConfig
+	setMultiPathTCP(&lc, false)
+	return lc.Listen(context.Background(), network, address)
+}
+
 func ListenPacketContext(ctx context.Context, network, address string) (net.PacketConn, error) {
 	address, err := preResolve(network, address)
 	if err != nil {
