@@ -1189,7 +1189,7 @@ func parseNameServer(servers []string, respectRules bool, preferH3 bool) ([]dns.
 			dnsNetType = "tcp" // TCP
 		case "tls":
 			addr, err = hostWithDefaultPort(u.Host, "853")
-			dnsNetType = "tcp-tls" // DNS over TLS
+			dnsNetType = "tls" // DNS over TLS
 		case "http", "https":
 			addr, err = hostWithDefaultPort(u.Host, "443")
 			dnsNetType = "https" // DNS over HTTPS
