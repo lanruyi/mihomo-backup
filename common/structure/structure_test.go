@@ -271,6 +271,23 @@ func TestStructure_Pointer(t *testing.T) {
 	assert.Nil(t, s.Bar)
 }
 
+func TestStructure_PointerStruct(t *testing.T) {
+	rawMap := map[string]any{
+		"foo": "foo",
+	}
+
+	s := &struct {
+		Foo *string `test:"foo,omitempty"`
+		Bar *Baz    `test:"bar,omitempty"`
+	}{}
+
+	err := decoder.Decode(rawMap, s)
+	assert.Nil(t, err)
+	assert.NotNil(t, s.Foo)
+	assert.Equal(t, "foo", *s.Foo)
+	assert.Nil(t, s.Bar)
+}
+
 type num struct {
 	a int
 }
