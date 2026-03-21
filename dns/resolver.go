@@ -200,14 +200,8 @@ func (r *Resolver) exchangeWithoutCache(ctx context.Context, m *D.Msg) (msg *D.M
 				return
 			}
 
-			msg := result
-
 			if cache {
-				// OPT RRs MUST NOT be cached, forwarded, or stored in or loaded from master files.
-				msg.Extra = lo.Filter(msg.Extra, func(rr D.RR, index int) bool {
-					return rr.Header().Rrtype != D.TypeOPT
-				})
-				putMsgToCache(r.cache, q, msg)
+				putMsgToCache(r.cache, q, result)
 			}
 		}()
 

@@ -75,7 +75,15 @@ func putMsgToCache(c dnsCache, q D.Question, msg *D.Msg) {
 	if ttl == 0 {
 		return
 	}
-	c.SetWithExpire(q.String(), msg.Copy(), time.Now().Add(time.Duration(ttl)*time.Second))
+
+	msg = msg.Copy() // never modify the original msg
+
+	// OPT RRs MUST NOT be cached, forwarded, or stored in or loaded from master files.
+	msg.Extra = lo.Filter(msg.Extra, func(rr D.RR, index int) bool {
+		return rr.Header().Rrtype != D.TypeOPT
+	})
+
+	c.SetWithExpire(q.String(), msg, time.Now().Add(time.Duration(ttl)*time.Second))
 }
 
 func setMsgTTL(msg *D.Msg, ttl uint32) {
