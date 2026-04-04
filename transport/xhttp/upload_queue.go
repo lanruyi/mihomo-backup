@@ -57,12 +57,12 @@ func (q *uploadQueue) Push(p Packet) error {
 
 func (q *uploadQueue) Read(b []byte) (int, error) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
 
 	for {
 		if len(q.buf) > 0 {
 			n := copy(b, q.buf)
 			q.buf = q.buf[n:]
+			q.mu.Unlock()
 			return n, nil
 		}
 
@@ -73,11 +73,13 @@ func (q *uploadQueue) Read(b []byte) (int, error) {
 			continue
 		}
 
-		if q.reader != nil {
-			return q.reader.Read(b)
+		if reader := q.reader; reader != nil {
+			q.mu.Unlock() // unlock before calling q.reader.Read
+			return reader.Read(b)
 		}
 
 		if q.closed {
+			q.mu.Unlock()
 			return 0, io.EOF
 		}
 
