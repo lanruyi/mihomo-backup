@@ -1,7 +1,6 @@
 package gun
 
 import (
-	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -45,7 +44,7 @@ func NewServerHandler(options ServerOption) http.Handler {
 			conn := &Conn{
 				initFn: func(addr *httputils.NetAddr) (io.ReadCloser, error) {
 					httputils.SetAddrFromRequest(addr, request)
-					return h2RequestBodyWrapper{request.Body}, nil
+					return request.Body, nil
 				},
 				writer: writer,
 			}
@@ -66,19 +65,6 @@ func NewServerHandler(options ServerOption) http.Handler {
 	}), &http.Http2Server{
 		IdleTimeout: idleTimeout,
 	})
-}
-
-// h2RequestBodyWrapper used to conceal the h2-special typed error before return to caller
-type h2RequestBodyWrapper struct {
-	io.ReadCloser
-}
-
-func (r h2RequestBodyWrapper) Read(p []byte) (n int, err error) {
-	n, err = r.ReadCloser.Read(p)
-	if err != nil && err != io.EOF {
-		err = fmt.Errorf("h2: %s", err.Error())
-	}
-	return
 }
 
 // h2ConnWrapper used to avoid "panic: Write called after Handler finished" for gun.Conn
@@ -110,11 +96,6 @@ func (w *h2ConnWrapper) CloseWrapper() {
 	w.access.Lock()
 	defer w.access.Unlock()
 	w.closed = true
-}
-
-func (w *h2ConnWrapper) Close() error {
-	w.CloseWrapper()
-	return w.ExtendedConn.Close()
 }
 
 func (w *h2ConnWrapper) Upstream() any {

@@ -49,6 +49,7 @@ type Conn struct {
 	reader   io.ReadCloser
 	remain   int
 
+	writeMutex sync.Mutex
 	closeMutex sync.Mutex
 	closed     bool
 
@@ -127,6 +128,8 @@ func (g *Conn) read(b []byte) (n int, err error) {
 }
 
 func (g *Conn) Write(b []byte) (n int, err error) {
+	g.writeMutex.Lock()
+	defer g.writeMutex.Unlock()
 	dataLen := len(b)
 	varLen := UVarintLen(uint64(dataLen))
 	buf := pool.Get(5 + 1 + varLen + dataLen)
@@ -153,6 +156,8 @@ func (g *Conn) Write(b []byte) (n int, err error) {
 }
 
 func (g *Conn) WriteBuffer(buffer *buf.Buffer) error {
+	g.writeMutex.Lock()
+	defer g.writeMutex.Unlock()
 	defer buffer.Release()
 	dataLen := buffer.Len()
 	varLen := UVarintLen(uint64(dataLen))
