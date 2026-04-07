@@ -43,11 +43,10 @@ func HandleConn(c net.Conn, tunnel C.Tunnel, store auth.AuthStore, additions ...
 	conn := N.NewBufferedConn(c)
 
 	authenticator := store.Authenticator()
-	keepAlive := true
 	trusted := authenticator == nil // disable authenticate if lru is nil
 	lastUser := ""
 
-	for keepAlive {
+	for {
 		peekMutex.Lock()
 		request, err := ReadRequest(conn.Reader())
 		peekMutex.Unlock()
@@ -57,7 +56,7 @@ func HandleConn(c net.Conn, tunnel C.Tunnel, store auth.AuthStore, additions ...
 
 		request.RemoteAddr = conn.RemoteAddr().String()
 
-		keepAlive = strings.TrimSpace(strings.ToLower(request.Header.Get("Proxy-Connection"))) == "keep-alive"
+		keepAlive := strings.TrimSpace(strings.ToLower(request.Header.Get("Proxy-Connection"))) == "keep-alive"
 
 		resp, user := authenticate(request, authenticator) // always call authenticate function to get user
 		if resp == nil {
@@ -129,30 +128,21 @@ func HandleConn(c net.Conn, tunnel C.Tunnel, store auth.AuthStore, additions ...
 			removeHopByHopHeaders(resp.Header)
 		}
 
-		resp.Close = !keepAlive
-		// See http.Response.Write implementation for the details on this.
-		//
-		// If we're sending a non-chunked HTTP/1.1 response without a
-		// content-length, the only way to do that is the old HTTP/1.0 way, by
-		// noting the EOF with a connection close, so we need to set Close.
-		if resp.ContentLength == -1 &&
-			!resp.Close &&
-			resp.ProtoAtLeast(1, 1) &&
-			(len(resp.TransferEncoding) == 0 || resp.TransferEncoding[0] != "chunked") &&
-			!resp.Uncompressed {
-			keepAlive = false
+		if !keepAlive {
+			resp.Close = true // close connection if keep-alive is not set
+		}
+		if keepAlive && resp.ContentLength > 0 {
+			resp.Close = false // don't need to close connection if content length is positive numbers
 		}
 
-		if keepAlive {
+		if !resp.Close {
 			resp.Header.Set("Proxy-Connection", "keep-alive")
 			resp.Header.Set("Connection", "keep-alive")
 			resp.Header.Set("Keep-Alive", "timeout=4")
 		}
 
-		resp.Close = !keepAlive
-
 		err = resp.Write(conn)
-		if err != nil {
+		if err != nil || resp.Close {
 			break // close connection
 		}
 	}
