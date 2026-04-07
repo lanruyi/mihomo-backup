@@ -59,11 +59,10 @@ func HandleConn(c net.Conn, tunnel C.Tunnel, store auth.AuthStore, additions ...
 
 		keepAlive = strings.TrimSpace(strings.ToLower(request.Header.Get("Proxy-Connection"))) == "keep-alive"
 
-		var resp *http.Response
-
-		var user string
-		resp, user = authenticate(request, authenticator) // always call authenticate function to get user
-		trusted = trusted || resp == nil
+		resp, user := authenticate(request, authenticator) // always call authenticate function to get user
+		if resp == nil {
+			trusted = true
+		}
 		additions[inUserIdx] = inbound.WithInUser(user)
 
 		if trusted {
@@ -128,6 +127,20 @@ func HandleConn(c net.Conn, tunnel C.Tunnel, store auth.AuthStore, additions ...
 			}
 
 			removeHopByHopHeaders(resp.Header)
+		}
+
+		resp.Close = !keepAlive
+		// See http.Response.Write implementation for the details on this.
+		//
+		// If we're sending a non-chunked HTTP/1.1 response without a
+		// content-length, the only way to do that is the old HTTP/1.0 way, by
+		// noting the EOF with a connection close, so we need to set Close.
+		if resp.ContentLength == -1 &&
+			!resp.Close &&
+			resp.ProtoAtLeast(1, 1) &&
+			(len(resp.TransferEncoding) == 0 || resp.TransferEncoding[0] != "chunked") &&
+			!resp.Uncompressed {
+			keepAlive = false
 		}
 
 		if keepAlive {
