@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/metacubex/mihomo/common/contextutils"
 	"github.com/metacubex/mihomo/common/convert"
 	N "github.com/metacubex/mihomo/common/net"
 	"github.com/metacubex/mihomo/common/utils"
@@ -601,14 +600,14 @@ func NewVless(option VlessOption) (*Vless, error) {
 					if err != nil {
 						return nil, err
 					}
-					quicConn, err := quic.DialEarly(ctx, packetConn, udpAddr, tlsConfig, cfg)
+					transport := quic.Transport{Conn: packetConn}
+					transport.SetCreatedConn(true) // auto close conn
+					transport.SetSingleUse(true)   // auto close transport
+					quicConn, err := transport.DialEarly(ctx, udpAddr, tlsConfig, cfg)
 					if err != nil {
 						_ = packetConn.Close()
 						return nil, err
 					}
-					contextutils.AfterFunc(quicConn.Context(), func() {
-						_ = packetConn.Close()
-					}) // quic.Conn does not close the packetConn when it is closed, so we need to call it manually
 					return quicConn, nil
 				},
 				v.option.ALPN,
@@ -756,14 +755,14 @@ func NewVless(option VlessOption) (*Vless, error) {
 						if err != nil {
 							return nil, err
 						}
-						quicConn, err := quic.DialEarly(ctx, packetConn, udpAddr, tlsConfig, cfg)
+						transport := quic.Transport{Conn: packetConn}
+						transport.SetCreatedConn(true) // auto close conn
+						transport.SetSingleUse(true)   // auto close transport
+						quicConn, err := transport.DialEarly(ctx, udpAddr, tlsConfig, cfg)
 						if err != nil {
 							_ = packetConn.Close()
 							return nil, err
 						}
-						contextutils.AfterFunc(quicConn.Context(), func() {
-							_ = packetConn.Close()
-						}) // quic.Conn does not close the packetConn when it is closed, so we need to call it manually
 						return quicConn, nil
 					},
 					downloadALPN,

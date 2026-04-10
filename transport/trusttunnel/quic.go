@@ -6,7 +6,6 @@ import (
 	"net"
 	"runtime"
 
-	"github.com/metacubex/mihomo/common/contextutils"
 	"github.com/metacubex/mihomo/transport/tuic/common"
 	"github.com/metacubex/mihomo/transport/vmess"
 
@@ -43,14 +42,14 @@ func (c *Client) quicRoundTripper(tlsConfig *vmess.TLSConfig, congestionControlN
 			if err != nil {
 				return nil, err
 			}
-			quicConn, err := quic.DialEarly(ctx, packetConn, net.UDPAddrFromAddrPort(addrPort), tlsCfg, cfg)
+			transport := quic.Transport{Conn: packetConn}
+			transport.SetCreatedConn(true) // auto close conn
+			transport.SetSingleUse(true)   // auto close transport
+			quicConn, err := transport.DialEarly(ctx, net.UDPAddrFromAddrPort(addrPort), tlsCfg, cfg)
 			if err != nil {
 				_ = packetConn.Close()
 				return nil, err
 			}
-			contextutils.AfterFunc(quicConn.Context(), func() {
-				_ = packetConn.Close()
-			}) // quic.Conn does not close the packetConn when it is closed, so we need to call it manually
 			common.SetCongestionController(quicConn, congestionControlName, cwnd)
 			return quicConn, nil
 		},
