@@ -188,12 +188,12 @@ func NewHysteria2(option Hysteria2Option) (*Hysteria2, error) {
 		UdpMTU:             option.UdpMTU,
 		ServerAddress:      M.ParseSocksaddr(addr),
 		PacketListener:     outbound.dialer,
-		QuicDialer: qtls.QuicDialerFunc(func(ctx context.Context, addr string, dialer qtls.PacketDialer, tlsCfg *tls.Config, cfg *quic.Config) (net.PacketConn, *quic.Conn, error) {
+		QuicDialer: qtls.QuicDialerFunc(func(ctx context.Context, addr string, dialer qtls.PacketDialer, tlsCfg *tls.Config, cfg *quic.Config, early bool) (net.PacketConn, *quic.Conn, error) {
 			err = echConfig.ClientHandle(ctx, tlsCfg)
 			if err != nil {
 				return nil, nil, err
 			}
-			return tuicCommon.DialQuicEarly(ctx, addr, outbound.DialOptions(), dialer, tlsCfg, cfg)
+			return tuicCommon.DialQuic(ctx, addr, outbound.DialOptions(), dialer, tlsCfg, cfg, early)
 		}),
 	}
 
