@@ -198,7 +198,7 @@ func NewHttpTestTunnel() *TestTunnel {
 		}
 
 		client := http.Client{
-			Timeout:   30 * time.Second,
+			//Timeout:   30 * time.Second,
 			Transport: transport,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
