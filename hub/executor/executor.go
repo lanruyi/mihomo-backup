@@ -45,8 +45,6 @@ import (
 
 var mux sync.Mutex
 
-var logRestfulTimestampFormat = "15:04:05.000"
-
 func readConfig(path string) ([]byte, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil, err
@@ -88,10 +86,6 @@ func ApplyConfig(cfg *config.Config, force bool) {
 	mux.Lock()
 	defer mux.Unlock()
 	log.SetLevel(cfg.General.LogLevel)
-	logRestfulTimestampFormat = cfg.General.LogRestfulTimestampFormat
-	if logRestfulTimestampFormat == "" {
-		logRestfulTimestampFormat = "15:04:05.000"
-	}
 
 	tunnel.OnSuspend()
 
@@ -131,10 +125,6 @@ func ApplyConfig(cfg *config.Config, force bool) {
 
 func initInnerTcp() {
 	inner.New(tunnel.Tunnel)
-}
-
-func GetLogRestfulTimestampFormat() string {
-	return logRestfulTimestampFormat
 }
 
 func GetGeneral() *config.General {

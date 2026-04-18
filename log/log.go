@@ -3,7 +3,6 @@ package log
 import (
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/metacubex/mihomo/common/observable"
 
@@ -29,7 +28,6 @@ func init() {
 type Event struct {
 	LogLevel LogLevel
 	Payload  string
-	Time     time.Time
 }
 
 func (e *Event) Type() string {
@@ -102,6 +100,5 @@ func newLog(logLevel LogLevel, format string, v ...any) Event {
 	return Event{
 		LogLevel: logLevel,
 		Payload:  fmt.Sprintf(format, v...),
-		Time:     time.Now(),
 	}
 }

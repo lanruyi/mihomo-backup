@@ -17,7 +17,6 @@ import (
 	"github.com/metacubex/mihomo/component/ca"
 	"github.com/metacubex/mihomo/component/ech"
 	C "github.com/metacubex/mihomo/constant"
-	"github.com/metacubex/mihomo/hub/executor"
 	"github.com/metacubex/mihomo/log"
 	"github.com/metacubex/mihomo/ntp"
 	"github.com/metacubex/mihomo/tunnel/statistic"
@@ -46,17 +45,15 @@ func SetEmbedMode(embed bool) {
 }
 
 type Traffic struct {
-	Up        int64  `json:"up"`
-	Down      int64  `json:"down"`
-	UpTotal   int64  `json:"upTotal"`
-	DownTotal int64  `json:"downTotal"`
-	Time      string `json:"time"`
+	Up        int64 `json:"up"`
+	Down      int64 `json:"down"`
+	UpTotal   int64 `json:"upTotal"`
+	DownTotal int64 `json:"downTotal"`
 }
 
 type Memory struct {
 	Inuse   uint64 `json:"inuse"`
 	OSLimit uint64 `json:"oslimit"` // maybe we need it in the future
-	Time    string `json:"time"`
 }
 
 type Config struct {
@@ -391,7 +388,6 @@ func traffic(w http.ResponseWriter, r *http.Request) {
 			Down:      down,
 			UpTotal:   upTotal,
 			DownTotal: downTotal,
-			Time:      time.Now().Format(executor.GetLogRestfulTimestampFormat()),
 		}); err != nil {
 			break
 		}
@@ -443,7 +439,6 @@ func memory(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewEncoder(buf).Encode(Memory{
 			Inuse:   inuse,
 			OSLimit: 0,
-			Time:    time.Now().Format(executor.GetLogRestfulTimestampFormat()),
 		}); err != nil {
 			break
 		}
@@ -463,7 +458,6 @@ func memory(w http.ResponseWriter, r *http.Request) {
 type Log struct {
 	Type    string `json:"type"`
 	Payload string `json:"payload"`
-	Time    string `json:"time"`
 }
 type LogStructuredField struct {
 	Key   string `json:"key"`
@@ -534,7 +528,6 @@ func getLogs(w http.ResponseWriter, r *http.Request) {
 			if err := json.NewEncoder(buf).Encode(Log{
 				Type:    logM.Type(),
 				Payload: logM.Payload,
-				Time:    logM.Time.Format(executor.GetLogRestfulTimestampFormat()),
 			}); err != nil {
 				break
 			}
@@ -544,7 +537,7 @@ func getLogs(w http.ResponseWriter, r *http.Request) {
 				newLevel = "warn"
 			}
 			if err := json.NewEncoder(buf).Encode(LogStructured{
-				Time:    logM.Time.Format(executor.GetLogRestfulTimestampFormat()),
+				Time:    time.Now().Format(time.TimeOnly),
 				Level:   newLevel,
 				Message: logM.Payload,
 				Fields:  []LogStructuredField{},
