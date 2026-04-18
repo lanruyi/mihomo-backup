@@ -58,6 +58,31 @@ func init() {
 	realityPublickey = base64.RawURLEncoding.EncodeToString(privateKey.PublicKey().Bytes())
 }
 
+type TestDialer struct{ dialer C.Dialer }
+
+func (t *TestDialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+start:
+	conn, err := t.dialer.DialContext(ctx, network, address)
+	if err != nil && ctx.Err() == nil {
+		// We are conducting tests locally, and they shouldn't fail.
+		// However, a large number of requests in a short period during concurrent testing can exhaust system ports.
+		// This can lead to various errors such as WSAECONNREFUSED and WSAENOBUFS.
+		// So we just retry if the context is not canceled.
+		goto start
+	}
+	return conn, err
+}
+
+func (t *TestDialer) ListenPacket(ctx context.Context, network, address string, rAddrPort netip.AddrPort) (net.PacketConn, error) {
+	return t.dialer.ListenPacket(ctx, network, address, rAddrPort)
+}
+
+func NewTestDialer() *TestDialer {
+	return &TestDialer{dialer: dialer.NewDialer()}
+}
+
+var _ C.Dialer = (*TestDialer)(nil)
+
 type TestTunnel struct {
 	HandleTCPConnFn    func(conn net.Conn, metadata *C.Metadata)
 	HandleUDPPacketFn  func(packet C.UDPPacket, metadata *C.Metadata)
