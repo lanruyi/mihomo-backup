@@ -69,7 +69,7 @@ func NewBase(opt BaseOption) *Base {
 		iface:  opt.Interface,
 		rmark:  opt.RoutingMark,
 		prefer: opt.Prefer,
-		id:     utils.NewUUIDV7(),
+		id:     utils.NewUUIDV4(),
 	}
 }
 
