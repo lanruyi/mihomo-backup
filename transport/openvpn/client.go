@@ -58,7 +58,7 @@ func (c *Client) Handshake(ctx context.Context) (*PushReply, error) {
 	if c == nil {
 		return nil, errors.New("nil openvpn client")
 	}
-	if ctx.Done() == nil {
+	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, defaultHandshakeTimeout)
 		defer cancel()
@@ -76,6 +76,9 @@ func (c *Client) Handshake(ctx context.Context) (*PushReply, error) {
 	}
 	controlConn := NewControlConn(c.control)
 	c.tlsConn = tls.Client(controlConn, tlsConfig)
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = c.tlsConn.SetDeadline(deadline)
+	}
 	if err := c.tlsConn.HandshakeContext(ctx); err != nil {
 		return nil, fmt.Errorf("openvpn tls handshake: %w", err)
 	}
