@@ -107,8 +107,14 @@ func Server(ctx context.Context, conn net.Conn, config *ServerConfig) (net.Conn,
 	default:
 		panic("unreachable")
 	}
-	if err != nil || user == "" {
-		return serverConn, err
+	if err != nil {
+		return nil, err
+	}
+	if config.version > 1 {
+		serverConn = N.NewDeadlineConn(serverConn)
+	}
+	if user == "" {
+		return serverConn, nil
 	}
 	return &authenticatedConn{Conn: serverConn, user: user}, nil
 }

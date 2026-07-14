@@ -6,9 +6,11 @@ import (
 	"crypto/hmac"
 	"crypto/sha1"
 	stdTLS "crypto/tls"
+	"encoding/binary"
 	"errors"
 	"io"
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -132,6 +134,81 @@ func TestV3UnauthenticatedConnectionFallsBack(t *testing.T) {
 	if !errors.Is(serverResult.err, ErrFallbackCompleted) {
 		t.Fatalf("server error = %v, want %v", serverResult.err, ErrFallbackCompleted)
 	}
+}
+
+func TestV3ReadDeadlinePreservesPartialFrame(t *testing.T) {
+	camouflageAddr := startCamouflageServer(t, false)
+	serverConfig := newTestServerConfig(t, 3, camouflageAddr)
+	frontendAddr, result := startServer(t, serverConfig)
+
+	rawClient, err := net.Dial("tcp", frontendAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rawClient.Close()
+	setTestDeadline(t, rawClient)
+	conn, err := NewShadowTLS(context.Background(), rawClient, &ShadowTLSOption{
+		Password:       testPassword,
+		Host:           testServerName,
+		SkipCertVerify: true,
+		Version:        3,
+	})
+	if err != nil {
+		t.Fatalf("client handshake: %v", err)
+	}
+	client := conn.(*verifiedConn)
+	if _, err = client.Write([]byte("initial request")); err != nil {
+		t.Fatalf("client write: %v", err)
+	}
+
+	serverResult := receiveServerResult(t, result)
+	if serverResult.err != nil {
+		t.Fatalf("server handshake: %v", serverResult.err)
+	}
+	defer serverResult.conn.Close()
+	initial := make([]byte, len("initial request"))
+	if _, err = io.ReadFull(serverResult.conn, initial); err != nil {
+		t.Fatalf("server read initial request: %v", err)
+	}
+
+	payload := []byte("payload after read deadline")
+	frame := makeV3ClientFrame(client, payload)
+	if _, err = rawClient.Write(frame[:tlsHMACHeaderSize]); err != nil {
+		t.Fatalf("client write partial frame: %v", err)
+	}
+	if err = serverResult.conn.SetReadDeadline(time.Now().Add(50 * time.Millisecond)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	buffer := make([]byte, len(payload))
+	if _, err = serverResult.conn.Read(buffer); !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("server read partial frame error = %v, want deadline exceeded", err)
+	}
+	if err = serverResult.conn.SetReadDeadline(time.Time{}); err != nil {
+		t.Fatalf("clear read deadline: %v", err)
+	}
+	if _, err = rawClient.Write(frame[tlsHMACHeaderSize:]); err != nil {
+		t.Fatalf("client write remaining frame: %v", err)
+	}
+	if _, err = io.ReadFull(serverResult.conn, buffer); err != nil {
+		t.Fatalf("server read completed frame: %v", err)
+	}
+	if !bytes.Equal(buffer, payload) {
+		t.Fatalf("server payload = %q, want %q", buffer, payload)
+	}
+}
+
+func makeV3ClientFrame(client *verifiedConn, payload []byte) []byte {
+	frame := make([]byte, tlsHMACHeaderSize+len(payload))
+	frame[0] = applicationData
+	frame[1] = 3
+	frame[2] = 3
+	binary.BigEndian.PutUint16(frame[3:tlsHeaderSize], uint16(hmacSize+len(payload)))
+	_, _ = client.hmacAdd.Write(payload)
+	hmacHash := client.hmacAdd.Sum(nil)[:hmacSize]
+	_, _ = client.hmacAdd.Write(hmacHash)
+	copy(frame[tlsHeaderSize:tlsHMACHeaderSize], hmacHash)
+	copy(frame[tlsHMACHeaderSize:], payload)
+	return frame
 }
 
 func TestHandshakeSelectionByServerName(t *testing.T) {
