@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"math/bits"
 	"sync"
 	"time"
 
@@ -28,9 +29,16 @@ const (
 	// Timeout before quic sniffer all packets
 	quicWaitConn = time.Second * 3
 
-	// maxCryptoStreamOffset is the maximum offset allowed on any of the crypto streams.
-	// This limits the size of the ClientHello and Certificates that can be received.
-	maxCryptoStreamOffset = 16 * (1 << 10)
+	// maxCryptoStreamOffset bounds both the highest Initial CRYPTO stream offset
+	// and the payload retained by the sniffer. Its coverage bitmap uses at most
+	// another 8 KiB. The 64 KiB payload budget matches TCP sniffing and the
+	// largest pooled buffer, and aligns with the Initial CRYPTO limits used by
+	// ngtcp2 and Cloudflare quiche while remaining more permissive than the
+	// 16 KiB limits in quic-go and BoringSSL.
+	// This is a resource policy, not a QUIC or TLS protocol limit. For example,
+	// rustls permits a 65,535-byte Handshake payload plus its four-byte header;
+	// covering that boundary case would exceed the shared 64 KiB sniffing budget.
+	maxCryptoStreamOffset = 64 * (1 << 10)
 )
 
 // RFC 9000 §19
@@ -48,9 +56,12 @@ var (
 	errNotQUICInitial = errors.New("not QUIC initial packet")
 )
 
+// QUIC v2 remaps long-header packet type bits, so Initial and Retry values are
+// stored with the other version-specific parameters.
 type quicStructure struct {
 	ver         uint32
 	typeInitial byte
+	typeRetry   byte
 	initialSalt []byte
 	labelPrefix string
 }
@@ -59,18 +70,21 @@ var (
 	quicDraft29 = quicStructure{
 		ver:         0xff00001d,
 		typeInitial: 0b00,
+		typeRetry:   0b11,
 		initialSalt: []byte{0xaf, 0xbf, 0xec, 0x28, 0x99, 0x93, 0xd2, 0x4c, 0x9e, 0x97, 0x86, 0xf1, 0x9c, 0x61, 0x11, 0xe0, 0x43, 0x90, 0xa8, 0x99},
 		labelPrefix: "quic",
 	}
 	quicV1 = quicStructure{ // RFC 9001 §5.2
 		ver:         0x1,
 		typeInitial: 0b00,
+		typeRetry:   0b11,
 		initialSalt: []byte{0x38, 0x76, 0x2c, 0xf7, 0xf5, 0x59, 0x34, 0xb3, 0x4d, 0x17, 0x9a, 0xe6, 0xa4, 0xc8, 0x0c, 0xad, 0xcc, 0xbb, 0x7f, 0x0a},
 		labelPrefix: "quic",
 	}
 	quicV2 = quicStructure{ // RFC 9369 §3.2 – 3.3
 		ver:         0x6b3343cf,
 		typeInitial: 0b01,
+		typeRetry:   0b00,
 		initialSalt: []byte{0x0d, 0xed, 0xe3, 0xde, 0xf7, 0x00, 0xa6, 0xdb, 0x81, 0x93, 0x81, 0xbe, 0x6e, 0x26, 0x9d, 0xcb, 0xf9, 0xbd, 0x2e, 0xd9},
 		labelPrefix: "quicv2",
 	}
@@ -124,11 +138,12 @@ func (sniffer *QUICSniffer) WrapperSender(packetSender constant.PacketSender, re
 var _ constant.PacketSender = (*quicPacketSender)(nil)
 
 type quicPacketSender struct {
-	structure *quicStructure
-	lock      sync.RWMutex
-	ranges    utils.IntRanges[uint64]
-	buffer    []byte
-	result    string
+	structure           *quicStructure
+	lock                sync.RWMutex
+	buffer              []byte
+	receivedCryptoData  []uint64
+	contiguousCryptoEnd uint64
+	result              string
 
 	replaceDomain sniffer.ReplaceDomain
 
@@ -139,7 +154,7 @@ type quicPacketSender struct {
 
 	done chan struct{}
 
-	closed    bool
+	closed bool
 }
 
 // Send will send PacketAdapter nonblocking
@@ -193,243 +208,25 @@ func (q *quicPacketSender) close() {
 			_ = pool.Put(q.buffer)
 			q.buffer = nil
 		}
-		q.ranges = nil
+		q.receivedCryptoData = nil
+		q.contiguousCryptoEnd = 0
 	}
 }
 
 func (q *quicPacketSender) readQUICData(b []byte) error {
-	buffer := buf.As(b)
-
-	typeByte, err := buffer.ReadByte()
-	if err != nil {
-		return errNotQUIC
-	}
-
-	isLongHeader := typeByte&0x80 > 0
-	if !isLongHeader || typeByte&0x40 == 0 {
-		return errNotQUICInitial
-	}
-
-	vb, err := buffer.ReadBytes(4)
-	if err != nil {
-		return errNotQUIC
-	}
-
-	s, err := q.getQUICStructure(vb)
-	if err != nil {
-		return err
-	}
-
-	connIDLen, err := buffer.ReadByte()
-	if err != nil || connIDLen == 0 {
-		return errNotQUIC
-	}
-
-	destConnID := make([]byte, int(connIDLen))
-	if _, err := io.ReadFull(buffer, destConnID); err != nil {
-		return errNotQUIC
-	}
-
-	packetType := (typeByte & 0x30) >> 4
-	if packetType != s.typeInitial {
-		return nil
-	}
-
-	if l, err := buffer.ReadByte(); err != nil {
-		return errNotQUIC
-	} else if _, err := buffer.ReadBytes(int(l)); err != nil {
-		return errNotQUIC
-	}
-
-	tokenLen, err := quicvarint.Read(buffer)
-	if err != nil || tokenLen > uint64(len(b)) {
-		return errNotQUIC
-	}
-
-	if _, err = buffer.ReadBytes(int(tokenLen)); err != nil {
-		return errNotQUIC
-	}
-
-	packetLen, err := quicvarint.Read(buffer)
-	if err != nil {
-		return errNotQUIC
-	}
-
-	hdrLen := len(b) - buffer.Len()
-
-	labels := q.expandLabels(destConnID, s)
-
-	block, err := aes.NewCipher(labels.hp)
-	if err != nil {
-		return err
-	}
-
-	cache := buf.NewPacket()
-	defer cache.Release()
-
-	if hdrLen+4+16 > len(b) {
-		return errNotQUIC
-	}
-
-	mask := cache.Extend(block.BlockSize())
-	block.Encrypt(mask, b[hdrLen+4:hdrLen+4+16])
-	firstByte := b[0]
-	// Encrypt/decrypt first byte.
-
-	if isLongHeader {
-		// Long header: 4 bits masked
-		// High 4 bits are not protected.
-		firstByte ^= mask[0] & 0x0f
-	} else {
-		// Short header: 5 bits masked
-		// High 3 bits are not protected.
-		firstByte ^= mask[0] & 0x1f
-	}
-	packetNumberLength := int(firstByte&0x3 + 1) // max = 4 (64-bit sequence number)
-	extHdrLen := hdrLen + packetNumberLength
-
-	// copy to avoid modify origin data
-	extHdr := cache.Extend(extHdrLen)
-	copy(extHdr, b)
-	extHdr[0] = firstByte
-
-	packetNumber := extHdr[hdrLen:extHdrLen]
-	// Encrypt/decrypt packet number.
-	for i := range packetNumber {
-		packetNumber[i] ^= mask[1+i]
-	}
-
-	if int(packetLen)+hdrLen > len(b) || extHdrLen > len(b) {
-		return errNotQUIC
-	}
-
-	data := b[extHdrLen : int(packetLen)+hdrLen]
-
-	aesCipher, err := aes.NewCipher(labels.key)
-	if err != nil {
-		return err
-	}
-	aead, err := cipher.NewGCM(aesCipher)
-	if err != nil {
-		return err
-	}
-
-	// We only decrypt once, so we do not need to XOR it back.
-	// https://github.com/quic-go/qtls-go1-20/blob/e132a0e6cb45e20ac0b705454849a11d09ba5a54/cipher_suites.go#L496
-	iv := bytes.Clone(labels.iv)
-	for i, b := range packetNumber {
-		iv[len(iv)-len(packetNumber)+i] ^= b
-	}
-	dst := cache.Extend(len(data))
-	decrypted, err := aead.Open(dst[:0], iv, data, extHdr)
-	if err != nil {
-		return err
-	}
-
-	buffer = buf.As(decrypted)
-
-	for i := 0; !buffer.IsEmpty(); i++ {
-		q.lock.RLock()
-		if q.closed {
-			q.lock.RUnlock()
-			// close() was called, just return
-			return nil
+	// A UDP datagram can contain multiple coalesced QUIC packets. Walk each
+	// packet boundary so every Initial packet contributes its CRYPTO data.
+	firstPacket := true
+	for len(b) > 0 {
+		packetLen, err := q.readQUICPacket(b, !firstPacket)
+		if err != nil {
+			return err
 		}
-		q.lock.RUnlock()
-
-		frameType := framePadding
-		for frameType == framePadding && !buffer.IsEmpty() {
-			frameType, _ = buffer.ReadByte()
+		if packetLen <= 0 || packetLen > len(b) {
+			return errNotQUIC
 		}
-		switch frameType {
-		case framePadding:
-		case framePing:
-		case frameAck, frameAckWithECN:
-			if _, err = quicvarint.Read(buffer); err != nil { // Field: Largest Acknowledged
-				return io.ErrUnexpectedEOF
-			}
-			if _, err = quicvarint.Read(buffer); err != nil { // Field: ACK Delay
-				return io.ErrUnexpectedEOF
-			}
-			ackRangeCount, err := quicvarint.Read(buffer) // Field: ACK Range Count
-			if err != nil {
-				return io.ErrUnexpectedEOF
-			}
-			if _, err = quicvarint.Read(buffer); err != nil { // Field: First ACK Range
-				return io.ErrUnexpectedEOF
-			}
-			for i := 0; i < int(ackRangeCount); i++ { // Field: ACK Range
-				if _, err = quicvarint.Read(buffer); err != nil { // Field: ACK Range -> Gap
-					return io.ErrUnexpectedEOF
-				}
-				if _, err = quicvarint.Read(buffer); err != nil { // Field: ACK Range -> ACK Range Length
-					return io.ErrUnexpectedEOF
-				}
-			}
-			if frameType == frameAckWithECN {
-				if _, err = quicvarint.Read(buffer); err != nil { // Field: ECN Counts -> ECT0 Count
-					return io.ErrUnexpectedEOF
-				}
-				if _, err = quicvarint.Read(buffer); err != nil { // Field: ECN Counts -> ECT1 Count
-					return io.ErrUnexpectedEOF
-				}
-				if _, err = quicvarint.Read(buffer); err != nil { //nolint:misspell // Field: ECN Counts -> ECT-CE Count
-					return io.ErrUnexpectedEOF
-				}
-			}
-		case frameCrypto:
-			offset, err := quicvarint.Read(buffer) // Field: Offset
-			if err != nil {
-				return io.ErrUnexpectedEOF
-			}
-			length, err := quicvarint.Read(buffer) // Field: Length
-			if err != nil || length > uint64(buffer.Len()) {
-				return io.ErrUnexpectedEOF
-			}
-
-			end := offset + length
-			if end > maxCryptoStreamOffset {
-				return io.ErrShortBuffer
-			}
-
-			q.lock.Lock()
-
-			if q.closed {
-				q.lock.Unlock()
-				return nil
-			}
-			if q.buffer == nil {
-				q.buffer = pool.Get(maxCryptoStreamOffset)[:end]
-			} else if end > uint64(len(q.buffer)) {
-				q.buffer = q.buffer[:end]
-			}
-			target := q.buffer[offset:end]
-			if _, err := buffer.Read(target); err != nil { // Field: Crypto Data
-				q.lock.Unlock()
-				return io.ErrUnexpectedEOF
-			}
-			q.ranges = append(q.ranges, utils.NewRange(offset, end))
-			q.ranges = q.ranges.Merge()
-			q.lock.Unlock()
-		case frameConnectionClose:
-			if _, err = quicvarint.Read(buffer); err != nil { // Field: Error Code
-				return io.ErrUnexpectedEOF
-			}
-			if _, err = quicvarint.Read(buffer); err != nil { // Field: Frame Type
-				return io.ErrUnexpectedEOF
-			}
-			length, err := quicvarint.Read(buffer) // Field: Reason Phrase Length
-			if err != nil {
-				return io.ErrUnexpectedEOF
-			}
-			if _, err := buffer.ReadBytes(int(length)); err != nil { // Field: Reason Phrase
-				return io.ErrUnexpectedEOF
-			}
-		default:
-			// Only above frame types are permitted in initial packet.
-			// See https://www.rfc-editor.org/rfc/rfc9000.html#section-17.2.2-8
-			return errNotQUICInitial
-		}
+		b = b[packetLen:]
+		firstPacket = false
 	}
 
 	domain, err := q.tryAssemble()
@@ -446,6 +243,319 @@ func (q *quicPacketSender) readQUICData(b []byte) error {
 	return nil
 }
 
+// readQUICPacket processes one packet and returns its length in the datagram.
+// Long-header packets carry an explicit length. A short-header packet is
+// accepted only after one of them and consumes the remainder because it has
+// no length field.
+func (q *quicPacketSender) readQUICPacket(b []byte, coalesced bool) (int, error) {
+	buffer := buf.As(b)
+
+	typeByte, err := buffer.ReadByte()
+	if err != nil {
+		return 0, errNotQUIC
+	}
+
+	if typeByte&0x80 == 0 {
+		if coalesced {
+			return len(b), nil
+		}
+		return 0, errNotQUICInitial
+	}
+	if typeByte&0x40 == 0 {
+		return 0, errNotQUICInitial
+	}
+
+	vb, err := buffer.ReadBytes(4)
+	if err != nil {
+		return 0, errNotQUIC
+	}
+
+	s, err := q.getQUICStructure(vb)
+	if err != nil {
+		return 0, err
+	}
+
+	connIDLen, err := buffer.ReadByte()
+	if err != nil || connIDLen == 0 {
+		return 0, errNotQUIC
+	}
+
+	destConnID := make([]byte, int(connIDLen))
+	if _, err := io.ReadFull(buffer, destConnID); err != nil {
+		return 0, errNotQUIC
+	}
+
+	if l, err := buffer.ReadByte(); err != nil {
+		return 0, errNotQUIC
+	} else if _, err := buffer.ReadBytes(int(l)); err != nil {
+		return 0, errNotQUIC
+	}
+
+	packetType := (typeByte & 0x30) >> 4
+	if packetType == s.typeRetry {
+		// Retry has no Length field and therefore consumes the rest of the datagram.
+		return len(b), nil
+	}
+
+	if packetType == s.typeInitial {
+		tokenLen, err := quicvarint.Read(buffer)
+		if err != nil || tokenLen > uint64(buffer.Len()) {
+			return 0, errNotQUIC
+		}
+
+		if _, err = buffer.ReadBytes(int(tokenLen)); err != nil {
+			return 0, errNotQUIC
+		}
+	}
+
+	packetLen, err := quicvarint.Read(buffer)
+	if err != nil {
+		return 0, errNotQUIC
+	}
+
+	hdrLen := len(b) - buffer.Len()
+	if packetLen > uint64(len(b)-hdrLen) {
+		return 0, errNotQUIC
+	}
+	packetEnd := hdrLen + int(packetLen)
+	if packetType != s.typeInitial {
+		// Skip coalesced 0-RTT and Handshake packets at their declared boundary.
+		return packetEnd, nil
+	}
+
+	labels := q.expandLabels(destConnID, s)
+
+	block, err := aes.NewCipher(labels.hp)
+	if err != nil {
+		return 0, err
+	}
+
+	cache := buf.NewPacket()
+	defer cache.Release()
+
+	if hdrLen+4+16 > packetEnd {
+		return 0, errNotQUIC
+	}
+
+	mask := cache.Extend(block.BlockSize())
+	block.Encrypt(mask, b[hdrLen+4:hdrLen+4+16])
+	firstByte := b[0]
+	// Long headers have their low four bits protected.
+	firstByte ^= mask[0] & 0x0f
+	packetNumberLength := int(firstByte&0x3 + 1) // max = 4 (64-bit sequence number)
+	extHdrLen := hdrLen + packetNumberLength
+
+	// copy to avoid modify origin data
+	extHdr := cache.Extend(extHdrLen)
+	copy(extHdr, b)
+	extHdr[0] = firstByte
+
+	packetNumber := extHdr[hdrLen:extHdrLen]
+	// Encrypt/decrypt packet number.
+	for i := range packetNumber {
+		packetNumber[i] ^= mask[1+i]
+	}
+
+	if extHdrLen > packetEnd {
+		return 0, errNotQUIC
+	}
+
+	data := b[extHdrLen:packetEnd]
+
+	aesCipher, err := aes.NewCipher(labels.key)
+	if err != nil {
+		return 0, err
+	}
+	aead, err := cipher.NewGCM(aesCipher)
+	if err != nil {
+		return 0, err
+	}
+
+	// We only decrypt once, so we do not need to XOR it back.
+	// https://github.com/quic-go/qtls-go1-20/blob/e132a0e6cb45e20ac0b705454849a11d09ba5a54/cipher_suites.go#L496
+	iv := bytes.Clone(labels.iv)
+	for i, b := range packetNumber {
+		iv[len(iv)-len(packetNumber)+i] ^= b
+	}
+	dst := cache.Extend(len(data))
+	decrypted, err := aead.Open(dst[:0], iv, data, extHdr)
+	if err != nil {
+		return 0, err
+	}
+
+	if err := q.readQUICFrames(decrypted); err != nil {
+		return 0, err
+	}
+
+	return packetEnd, nil
+}
+
+// readQUICFrames validates the frames allowed in an Initial packet and retains
+// CRYPTO frame data for ClientHello reassembly.
+func (q *quicPacketSender) readQUICFrames(data []byte) error {
+	buffer := buf.As(data)
+	for !buffer.IsEmpty() {
+		q.lock.RLock()
+		if q.closed {
+			q.lock.RUnlock()
+			// close() was called, just return
+			return nil
+		}
+		q.lock.RUnlock()
+
+		frameType := framePadding
+		for frameType == framePadding && !buffer.IsEmpty() {
+			frameType, _ = buffer.ReadByte()
+		}
+		switch frameType {
+		case framePadding:
+		case framePing:
+		case frameAck, frameAckWithECN:
+			if _, err := quicvarint.Read(buffer); err != nil { // Field: Largest Acknowledged
+				return io.ErrUnexpectedEOF
+			}
+			if _, err := quicvarint.Read(buffer); err != nil { // Field: ACK Delay
+				return io.ErrUnexpectedEOF
+			}
+			ackRangeCount, err := quicvarint.Read(buffer) // Field: ACK Range Count
+			if err != nil {
+				return io.ErrUnexpectedEOF
+			}
+			if _, err := quicvarint.Read(buffer); err != nil { // Field: First ACK Range
+				return io.ErrUnexpectedEOF
+			}
+			for i := uint64(0); i < ackRangeCount; i++ { // Field: ACK Range
+				if _, err := quicvarint.Read(buffer); err != nil { // Field: ACK Range -> Gap
+					return io.ErrUnexpectedEOF
+				}
+				if _, err := quicvarint.Read(buffer); err != nil { // Field: ACK Range -> ACK Range Length
+					return io.ErrUnexpectedEOF
+				}
+			}
+			if frameType == frameAckWithECN {
+				if _, err := quicvarint.Read(buffer); err != nil { // Field: ECN Counts -> ECT0 Count
+					return io.ErrUnexpectedEOF
+				}
+				if _, err := quicvarint.Read(buffer); err != nil { // Field: ECN Counts -> ECT1 Count
+					return io.ErrUnexpectedEOF
+				}
+				if _, err := quicvarint.Read(buffer); err != nil { //nolint:misspell // Field: ECN Counts -> ECT-CE Count
+					return io.ErrUnexpectedEOF
+				}
+			}
+		case frameCrypto:
+			offset, err := quicvarint.Read(buffer) // Field: Offset
+			if err != nil {
+				return io.ErrUnexpectedEOF
+			}
+			length, err := quicvarint.Read(buffer) // Field: Length
+			if err != nil || length > uint64(buffer.Len()) {
+				return io.ErrUnexpectedEOF
+			}
+			data, err := buffer.ReadBytes(int(length)) // Field: Crypto Data
+			if err != nil {
+				return io.ErrUnexpectedEOF
+			}
+			if err := q.addCryptoData(offset, data); err != nil {
+				return err
+			}
+		case frameConnectionClose:
+			if _, err := quicvarint.Read(buffer); err != nil { // Field: Error Code
+				return io.ErrUnexpectedEOF
+			}
+			if _, err := quicvarint.Read(buffer); err != nil { // Field: Frame Type
+				return io.ErrUnexpectedEOF
+			}
+			length, err := quicvarint.Read(buffer) // Field: Reason Phrase Length
+			if err != nil {
+				return io.ErrUnexpectedEOF
+			}
+			if _, err := buffer.ReadBytes(int(length)); err != nil { // Field: Reason Phrase
+				return io.ErrUnexpectedEOF
+			}
+		default:
+			// Only above frame types are permitted in initial packet.
+			// See https://www.rfc-editor.org/rfc/rfc9000.html#section-17.2.2-8
+			return errNotQUICInitial
+		}
+	}
+	return nil
+}
+
+// addCryptoData stores a bounded CRYPTO fragment, growing the buffer only as
+// needed and tracking exact byte coverage across out-of-order, overlapping, or
+// retransmitted frames.
+func (q *quicPacketSender) addCryptoData(offset uint64, data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+	length := uint64(len(data))
+	if offset > maxCryptoStreamOffset || length > maxCryptoStreamOffset-offset {
+		return io.ErrShortBuffer
+	}
+	end := offset + length
+
+	q.lock.Lock()
+	defer q.lock.Unlock()
+	if q.closed {
+		return nil
+	}
+
+	if end > uint64(cap(q.buffer)) {
+		newBuffer := pool.Get(int(end))
+		copy(newBuffer, q.buffer)
+		_ = pool.Put(q.buffer)
+		q.buffer = newBuffer
+	} else if end > uint64(len(q.buffer)) {
+		q.buffer = q.buffer[:end]
+	}
+	copy(q.buffer[offset:end], data)
+
+	wordCount := (cap(q.buffer) + 63) / 64
+	if wordCount > len(q.receivedCryptoData) {
+		receivedCryptoData := make([]uint64, wordCount)
+		copy(receivedCryptoData, q.receivedCryptoData)
+		q.receivedCryptoData = receivedCryptoData
+	}
+	firstWord := int(offset / 64)
+	lastWord := int((end - 1) / 64)
+	firstMask := ^uint64(0) << (offset % 64)
+	lastMask := ^uint64(0)
+	if endBit := end % 64; endBit != 0 {
+		lastMask = (uint64(1) << endBit) - 1
+	}
+	if firstWord == lastWord {
+		q.receivedCryptoData[firstWord] |= firstMask & lastMask
+	} else {
+		q.receivedCryptoData[firstWord] |= firstMask
+		for i := firstWord + 1; i < lastWord; i++ {
+			q.receivedCryptoData[i] = ^uint64(0)
+		}
+		q.receivedCryptoData[lastWord] |= lastMask
+	}
+
+	// The contiguous prefix only moves forward, so each retained byte is
+	// checked at most once regardless of fragment order or retransmission.
+	if offset <= q.contiguousCryptoEnd && end > q.contiguousCryptoEnd {
+		for q.contiguousCryptoEnd < uint64(len(q.buffer)) {
+			word := q.receivedCryptoData[q.contiguousCryptoEnd/64] >> (q.contiguousCryptoEnd % 64)
+			covered := uint64(bits.TrailingZeros64(^word))
+			remaining := uint64(len(q.buffer)) - q.contiguousCryptoEnd
+			if wordRemaining := 64 - q.contiguousCryptoEnd%64; remaining > wordRemaining {
+				remaining = wordRemaining
+			}
+			if covered > remaining {
+				covered = remaining
+			}
+			q.contiguousCryptoEnd += covered
+			if covered < remaining {
+				break
+			}
+		}
+	}
+	return nil
+}
+
 func (q *quicPacketSender) tryAssemble() (string, error) {
 	q.lock.RLock()
 	defer q.lock.RUnlock()
@@ -455,20 +565,24 @@ func (q *quicPacketSender) tryAssemble() (string, error) {
 		return "", nil
 	}
 
-	if len(q.ranges) != 1 || q.ranges[0].Start() != 0 || q.ranges[0].End() != uint64(len(q.buffer)) {
-		// incomplete fragment, just return
+	if q.contiguousCryptoEnd < tlsHandshakeHeaderLen {
+		// The beginning of the CRYPTO stream is still incomplete.
 		return "", nil
 	}
 
-	if len(q.buffer) <= 4 ||
-		// Handshake Type (1) + uint24 Length (3) + ClientHello body
-		// maxCryptoStreamOffset is in the valid range of uint16 so just ignore the q.buffer[1]
-		int(binary.BigEndian.Uint16([]byte{q.buffer[2], q.buffer[3]})+4) != len(q.buffer) {
-		// end of segment not reached, just return
+	helloSize, err := clientHelloSize(q.buffer[:tlsHandshakeHeaderLen])
+	if err != nil {
+		return "", err
+	}
+	if helloSize > maxCryptoStreamOffset {
+		return "", io.ErrShortBuffer
+	}
+	if q.contiguousCryptoEnd < uint64(helloSize) {
+		// The complete ClientHello has not arrived yet.
 		return "", nil
 	}
 
-	domain, err := ReadClientHello(q.buffer)
+	domain, err := ReadClientHello(q.buffer[:helloSize])
 	if err != nil {
 		return "", err
 	}
